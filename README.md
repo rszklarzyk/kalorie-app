@@ -39,14 +39,18 @@ npx expo start
 
 Aparat, galeria i SQLite są wbudowane w aplikację **Expo Go**: zainstaluj ją ze Sklepu Play i zeskanuj kod QR z terminala. Telefon i komputer muszą być w tej samej sieci Wi-Fi (albo uruchom `npx expo start --tunnel`).
 
-### Własny plik APK (bez komputera po instalacji)
+### Własna aplikacja (plik APK, bez Expo Go)
+
+APK budowany jest w chmurze Expo, więc nie potrzebujesz Android Studio. Wystarczy darmowe konto na [expo.dev](https://expo.dev/signup).
 
 ```bash
 npx eas-cli@latest login
 npx eas-cli@latest build -p android --profile preview
 ```
 
-Przy pierwszym uruchomieniu EAS zapyta o utworzenie `eas.json`. W profilu `preview` ustaw `"android": { "buildType": "apk" }`, a zmienne z `.env` dodaj jako zmienne środowiskowe EAS. Darmowe konto Expo wystarczy.
+Przy pierwszym budowaniu odpowiedz „Yes” na pytania o utworzenie projektu i klucza do podpisywania aplikacji. Po około 10–20 minutach dostaniesz link i kod QR: otwórz go na telefonie, pobierz plik APK i zainstaluj (Android poprosi o zgodę na instalację z nieznanego źródła).
+
+Adres workera z `.env` jest wpisywany do aplikacji w momencie budowania, więc po włączeniu analizy zdjęć zbuduj APK jeszcze raz.
 
 ## Analiza zdjęć (worker)
 
