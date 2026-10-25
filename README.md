@@ -50,7 +50,7 @@ npx eas-cli@latest build -p android --profile preview
 
 Przy pierwszym budowaniu odpowiedz „Yes” na pytania o utworzenie projektu i klucza do podpisywania aplikacji. Po około 10–20 minutach dostaniesz link i kod QR: otwórz go na telefonie, pobierz plik APK i zainstaluj (Android poprosi o zgodę na instalację z nieznanego źródła).
 
-Adres workera z `.env` jest wpisywany do aplikacji w momencie budowania, więc po włączeniu analizy zdjęć zbuduj APK jeszcze raz.
+Plik `.env` nie jest wysyłany do chmury Expo. Po wdrożeniu workera dodaj `EXPO_PUBLIC_ANALYZE_URL` i `EXPO_PUBLIC_APP_TOKEN` na [expo.dev](https://expo.dev) w ustawieniach projektu (Environment variables, środowisko „preview”) i zbuduj APK jeszcze raz, bo te wartości są wpisywane do aplikacji w momencie budowania.
 
 ## Analiza zdjęć (worker)
 
