@@ -1,0 +1,8 @@
+name = "kalorie-analyze"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Sekrety ustaw poleceniami (nie wpisuj ich tutaj):
+#   npx wrangler secret put ANTHROPIC_API_KEY
+#   npx wrangler secret put APP_TOKEN
