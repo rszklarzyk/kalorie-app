@@ -38,7 +38,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Aparat s\u0142u\u017cy do robienia zdj\u0119\u0107 posi\u0142k\u00f3w i skanowania kod\u00f3w kreskowych.",
+          "cameraPermission": "Aparat służy do robienia zdjęć posiłków i skanowania kodów kreskowych.",
           "recordAudioAndroid": false,
           "microphonePermission": false
         }
@@ -46,8 +46,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Dost\u0119p do zdj\u0119\u0107 pozwala wybra\u0107 zdj\u0119cie posi\u0142ku z galerii.",
-          "cameraPermission": "Aparat s\u0142u\u017cy do robienia zdj\u0119\u0107 posi\u0142k\u00f3w."
+          "photosPermission": "Dostęp do zdjęć pozwala wybrać zdjęcie posiłku z galerii.",
+          "cameraPermission": "Aparat służy do robienia zdjęć posiłków."
         }
       ],
       "expo-sqlite"
@@ -55,6 +55,11 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "86d34983-5adc-44c4-8b35-ea942ba8922d"
+      }
     }
   }
 }

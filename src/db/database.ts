@@ -3,7 +3,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import type { Dish, Entry, NewEntry } from '@/lib/types';
 
 export const DATABASE_NAME = 'kalorie.db';
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 export const DEFAULT_DAILY_GOAL = 2000;
 
 /** Tworzy lub migruje schemat. Wywoływane przez SQLiteProvider przy starcie. */
@@ -44,12 +44,32 @@ export async function migrate(db: SQLiteDatabase) {
       );
     `);
   }
+  if (version < 3) {
+    await db.execAsync(`
+      ALTER TABLE entries ADD COLUMN meal_id INTEGER;
+      ALTER TABLE entries ADD COLUMN meal_name TEXT;
+      CREATE TABLE IF NOT EXISTS suggestion_cache (
+        query TEXT PRIMARY KEY NOT NULL,
+        json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  }
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
-type EntryRow = Omit<Entry, 'createdAt'> & { created_at: string };
+type EntryRow = Omit<Entry, 'createdAt' | 'mealId' | 'mealName'> & {
+  created_at: string;
+  meal_id: number | null;
+  meal_name: string | null;
+};
 
-const fromRow = ({ created_at, ...rest }: EntryRow): Entry => ({ ...rest, createdAt: created_at });
+const fromRow = ({ created_at, meal_id, meal_name, ...rest }: EntryRow): Entry => ({
+  ...rest,
+  mealId: meal_id,
+  mealName: meal_name,
+  createdAt: created_at,
+});
 
 export async function getEntriesForDate(db: SQLiteDatabase, date: string): Promise<Entry[]> {
   const rows = await db.getAllAsync<EntryRow>('SELECT * FROM entries WHERE date = ? ORDER BY id', date);
@@ -58,13 +78,18 @@ export async function getEntriesForDate(db: SQLiteDatabase, date: string): Promi
 
 export async function addEntry(db: SQLiteDatabase, e: NewEntry) {
   await db.runAsync(
-    'INSERT INTO entries (date, name, grams, kcal, protein, fat, carbs, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    e.date, e.name, e.grams, e.kcal, e.protein, e.fat, e.carbs, e.source,
+    `INSERT INTO entries (date, name, grams, kcal, protein, fat, carbs, source, meal_id, meal_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    e.date, e.name, e.grams, e.kcal, e.protein, e.fat, e.carbs, e.source, e.mealId, e.mealName,
   );
 }
 
 export async function deleteEntry(db: SQLiteDatabase, id: number) {
   await db.runAsync('DELETE FROM entries WHERE id = ?', id);
+}
+
+export async function deleteMeal(db: SQLiteDatabase, mealId: number) {
+  await db.runAsync('DELETE FROM entries WHERE meal_id = ?', mealId);
 }
 
 /** Ostatnio dodawane produkty, do szybkiego ponownego wpisu. */
@@ -112,4 +137,21 @@ export async function addDish(db: SQLiteDatabase, dish: Omit<Dish, 'id'>) {
 
 export async function deleteDish(db: SQLiteDatabase, id: number) {
   await db.runAsync('DELETE FROM dishes WHERE id = ?', id);
+}
+
+/** Podpowiedzi AI zapamiętane lokalnie, żeby to samo zapytanie nie kosztowało drugi raz. */
+export async function getCachedSuggestions<T>(db: SQLiteDatabase, query: string): Promise<T | null> {
+  const row = await db.getFirstAsync<{ json: string }>(
+    "SELECT json FROM suggestion_cache WHERE query = ? AND created_at > datetime('now', '-90 days')",
+    query.toLowerCase(),
+  );
+  return row ? (JSON.parse(row.json) as T) : null;
+}
+
+export async function cacheSuggestions(db: SQLiteDatabase, query: string, value: unknown) {
+  await db.runAsync(
+    'INSERT OR REPLACE INTO suggestion_cache (query, json) VALUES (?, ?)',
+    query.toLowerCase(),
+    JSON.stringify(value),
+  );
 }

@@ -17,10 +17,13 @@ export type Entry = {
   fat: number;
   carbs: number;
   source: EntrySource;
+  /** Pozycje zapisane razem (np. ze jednego zdjęcia) mają wspólny posiłek. */
+  mealId: number | null;
+  mealName: string | null;
   createdAt: string;
 };
 
-export type EntrySource = 'manual' | 'search' | 'photo';
+export type EntrySource = 'manual' | 'search' | 'photo' | 'ai';
 
 export type NewEntry = Omit<Entry, 'id' | 'createdAt'>;
 
@@ -30,6 +33,8 @@ export type Draft = {
   grams: number;
   per100g: Per100g;
   source: EntrySource;
+  /** Porcja wyjściowa (np. „1 średni banan” = 120 g), od której liczymy ½×, 2× itd. */
+  baseGrams?: number;
 };
 
 export type Totals = Per100g;

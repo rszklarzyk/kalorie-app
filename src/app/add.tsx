@@ -11,10 +11,11 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, Card, Chip, Input } from '@/components/ui';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { addEntry, getDishes, getRecentNames } from '@/db/database';
+import { addEntry, cacheSuggestions, getCachedSuggestions, getDishes, getRecentNames } from '@/db/database';
 import { analyzePhoto, isPhotoAnalysisConfigured } from '@/lib/analyze-photo';
-import { draftToEntry, forPortion, parseNumber, sumTotals, toDateKey } from '@/lib/nutrition';
+import { draftToEntry, forPortion, mealNameFor, parseNumber, splitQuantity, sumTotals, toDateKey } from '@/lib/nutrition';
 import { getByBarcode, searchFoods, toDraft, type FoodResult } from '@/lib/openfoodfacts';
+import { suggestPortions, type Suggestion } from '@/lib/suggest';
 import type { Dish, Draft, Entry } from '@/lib/types';
 
 const emptyDraft = (): Draft => ({
@@ -47,11 +48,14 @@ export default function AddScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoodResult[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [searched, setSearched] = useState<{ text: string; grams: number | null } | null>(null);
   const [scanning, setScanning] = useState(false);
   const [recent, setRecent] = useState<Entry[]>([]);
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [dishId, setDishId] = useState<number | null>(null);
   const [scaleWeight, setScaleWeight] = useState('');
+  const [mealName, setMealName] = useState('');
 
   useFocusEffect(
     useCallback(() => {
@@ -64,7 +68,18 @@ export default function AddScreen() {
   const scale = parseNumber(scaleWeight);
   const foodGrams = scale > 0 ? Math.round(scale - (dish?.weightG ?? 0)) : 0;
 
-  const addDrafts = (more: Draft[]) => setDrafts((d) => [...d, ...more]);
+  const addDrafts = (more: Draft[]) =>
+    setDrafts((d) => [...d, ...more.map((x) => (x.baseGrams || x.source === 'manual' ? x : { ...x, baseGrams: x.grams }))]);
+
+  /** Szybkie dodawanie: to, co wpisano w wyszukiwarce, staje się nazwą (i gramaturą). */
+  const quickAdd = () => {
+    const parsed = query.trim() ? splitQuantity(query) : null;
+    addDrafts([{ ...emptyDraft(), name: parsed?.text ?? '', grams: parsed?.grams ?? 100 }]);
+    setResults([]);
+    setSuggestions([]);
+    setSearched(null);
+    setQuery('');
+  };
 
   const runPhoto = async (fromCamera: boolean) => {
     const perm = fromCamera
@@ -97,16 +112,52 @@ export default function AddScreen() {
     }
   };
 
+  // Najpierw darmowa baza Open Food Facts; AI (płatne, choć tanie) tylko na życzenie.
   const runSearch = async () => {
     if (!query.trim()) return;
+    const parsed = splitQuantity(query);
+    setSearched(parsed);
     setBusy('Szukam…');
+    setResults([]);
+    setSuggestions([]);
     try {
-      setResults(await searchFoods(query.trim()));
+      const found = await searchFoods(parsed.text);
+      setResults(found);
+      if (found.length === 0 && !isPhotoAnalysisConfigured) {
+        Alert.alert('Brak wyników', `Nic nie znalazłem dla „${parsed.text}”. Sprawdź pisownię albo wpisz produkt ręcznie.`);
+      }
     } catch (err) {
       Alert.alert('Błąd wyszukiwania', errorMessage(err));
     } finally {
       setBusy(null);
     }
+  };
+
+  const askAi = async () => {
+    if (!searched) return;
+    setBusy('Pytam AI…');
+    try {
+      const cached = await getCachedSuggestions<Suggestion[]>(db, searched.text);
+      const options = cached ?? (await suggestPortions(searched.text));
+      if (!cached && options.length > 0) await cacheSuggestions(db, searched.text, options);
+      setSuggestions(options);
+      if (options.length === 0) Alert.alert('Brak podpowiedzi', 'AI nie rozpoznało tego produktu. Wpisz go ręcznie.');
+    } catch (err) {
+      Alert.alert('Błąd podpowiedzi', errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Gramatura wpisana w wyszukiwarce („pizza 300 g”) wygrywa z domyślną porcją. */
+  const withSearchedGrams = (d: Draft): Draft => (searched?.grams ? { ...d, grams: searched.grams } : d);
+
+  const pickResult = (d: Draft) => {
+    addDrafts([withSearchedGrams(d)]);
+    setResults([]);
+    setSuggestions([]);
+    setSearched(null);
+    setQuery('');
   };
 
   const onScanned = async (code: string) => {
@@ -126,19 +177,25 @@ export default function AddScreen() {
   const save = async () => {
     const valid = drafts.filter((d) => d.name.trim() && d.grams > 0);
     if (valid.length === 0) return Alert.alert('Nic do zapisania', 'Uzupełnij nazwę i porcję.');
+    // Wszystko zapisane naraz to jeden posiłek, np. śniadanie ze zdjęcia.
+    const meal = { id: Date.now(), name: mealName.trim() || mealNameFor(new Date()) };
     await db.withTransactionAsync(async () => {
-      for (const d of valid) await addEntry(db, draftToEntry({ ...d, name: d.name.trim() }, date));
+      for (const d of valid) await addEntry(db, draftToEntry({ ...d, name: d.name.trim() }, date, meal));
     });
     setDrafts([]);
     setNotes('');
     setHint('');
     setScaleWeight('');
+    setMealName('');
     setResults([]);
+    setSuggestions([]);
     setQuery('');
     router.navigate('/');
   };
 
   const total = sumTotals(drafts.map((d) => forPortion(d.per100g, d.grams)));
+
+  if (scanning) return <BarcodeScanner onScanned={onScanned} onClose={() => setScanning(false)} />;
 
   return (
     <ThemedView style={styles.container}>
@@ -194,32 +251,75 @@ export default function AddScreen() {
           <Card>
             <ThemedText type="smallBold">Z bazy produktów</ThemedText>
             <View style={styles.row}>
-              <Input placeholder="np. jogurt naturalny" value={query} onChangeText={setQuery} onSubmitEditing={runSearch} returnKeyType="search" />
+              <Input placeholder="np. jogurt naturalny, pizza mrożona 300 g" value={query} onChangeText={setQuery} onSubmitEditing={runSearch} returnKeyType="search" />
             </View>
             <View style={styles.row}>
               <Button title="Szukaj" onPress={runSearch} disabled={!!busy} />
               <Button title="Skanuj kod" variant="secondary" onPress={() => setScanning(true)} disabled={!!busy} />
             </View>
+            {busy === 'Szukam…' || busy === 'Pytam AI…' ? (
+              <View style={styles.row}>
+                <ActivityIndicator />
+                <ThemedText themeColor="textSecondary">{busy}</ThemedText>
+              </View>
+            ) : null}
+            {searched?.grams ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                Porcja: {searched.grams} g (z wpisu)
+              </ThemedText>
+            ) : null}
+            {suggestions.length > 0 ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                Typowe porcje
+              </ThemedText>
+            ) : null}
+            {suggestions.map((s, i) => (
+              <Pressable
+                key={`ai-${i}`}
+                onPress={() => pickResult(s.draft)}
+                style={styles.result}>
+                <View style={styles.flex}>
+                  <ThemedText numberOfLines={1}>{s.draft.name}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {searched?.grams ? `${searched.grams} g` : `${s.portion} · ${s.draft.grams} g`}
+                  </ThemedText>
+                </View>
+                <ThemedText type="smallBold">{forPortion(s.draft.per100g, withSearchedGrams(s.draft).grams).kcal} kcal</ThemedText>
+              </Pressable>
+            ))}
+            {results.length > 0 ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                Produkty ze sklepu (Open Food Facts)
+              </ThemedText>
+            ) : null}
             {results.map((r, i) => (
               <Pressable
                 key={`${r.code ?? r.name}-${i}`}
-                onPress={() => {
-                  addDrafts([toDraft(r)]);
-                  setResults([]);
-                }}
+                onPress={() => pickResult(toDraft(r))}
                 style={styles.result}>
                 <ThemedText numberOfLines={2} style={styles.flex}>
                   {r.name}
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
-                  {r.per100g.kcal} kcal/100 g
+                  {searched?.grams
+                    ? `${forPortion(r.per100g, searched.grams).kcal} kcal`
+                    : `${r.per100g.kcal} kcal/100 g`}
                 </ThemedText>
               </Pressable>
             ))}
+            {searched && !busy && suggestions.length === 0 && isPhotoAnalysisConfigured ? (
+              <View style={styles.row}>
+                <Button
+                  title={results.length > 0 ? 'Nie ma? Zapytaj AI o porcje' : 'Brak w bazie. Zapytaj AI o porcje'}
+                  variant="secondary"
+                  onPress={askAi}
+                />
+              </View>
+            ) : null}
           </Card>
 
           <View style={styles.row}>
-            <Button title="Wpisz ręcznie" variant="secondary" onPress={() => addDrafts([emptyDraft()])} disabled={!!busy} />
+            <Button title="Szybkie dodawanie (nazwa i kcal)" variant="secondary" onPress={quickAdd} disabled={!!busy} />
           </View>
 
           {recent.length > 0 && drafts.length === 0 ? (
@@ -238,7 +338,7 @@ export default function AddScreen() {
             </Card>
           ) : null}
 
-          {busy ? (
+          {busy && busy !== 'Szukam…' && busy !== 'Pytam AI…' ? (
             <View style={styles.row}>
               <ActivityIndicator />
               <ThemedText themeColor="textSecondary">{busy}</ThemedText>
@@ -255,17 +355,20 @@ export default function AddScreen() {
             <DraftEditor
               key={i}
               draft={d}
+              dishes={dishes}
               onChange={(next) => setDrafts((all) => all.map((x, j) => (j === i ? next : x)))}
               onRemove={() => setDrafts((all) => all.filter((_, j) => j !== i))}
             />
           ))}
 
           {drafts.length > 0 ? (
-            <Button title={`Zapisz (${total.kcal} kcal)`} onPress={save} disabled={!!busy} />
+            <>
+              <Input label="Posiłek" placeholder={mealNameFor(new Date())} value={mealName} onChangeText={setMealName} />
+              <Button title={`Zapisz posiłek (${total.kcal} kcal)`} onPress={save} disabled={!!busy} />
+            </>
           ) : null}
         </ScrollView>
       </SafeAreaView>
-      <BarcodeScanner visible={scanning} onScanned={onScanned} onClose={() => setScanning(false)} />
     </ThemedView>
   );
 }

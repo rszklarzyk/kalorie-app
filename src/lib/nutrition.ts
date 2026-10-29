@@ -12,8 +12,27 @@ export function forPortion(per100g: Per100g, grams: number): Per100g {
   };
 }
 
-export function draftToEntry(draft: Draft, date: string): NewEntry {
-  return { date, name: draft.name, grams: draft.grams, source: draft.source, ...forPortion(draft.per100g, draft.grams) };
+type Meal = { id: number; name: string } | null;
+
+export function draftToEntry(draft: Draft, date: string, meal: Meal = null): NewEntry {
+  return {
+    date,
+    name: draft.name,
+    grams: draft.grams,
+    source: draft.source,
+    mealId: meal?.id ?? null,
+    mealName: meal?.name ?? null,
+    ...forPortion(draft.per100g, draft.grams),
+  };
+}
+
+/** Domyślna nazwa posiłku według pory dnia. */
+export function mealNameFor(date: Date): string {
+  const h = date.getHours();
+  if (h < 11) return 'Śniadanie';
+  if (h < 16) return 'Obiad';
+  if (h < 21) return 'Kolacja';
+  return 'Przekąska';
 }
 
 export function sumTotals(items: Per100g[]): Totals {
@@ -44,4 +63,14 @@ export function shiftDateKey(key: string, days: number): string {
 export function parseNumber(text: string): number {
   const n = Number(text.replace(',', '.').trim());
   return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/** Wyciąga gramaturę z wpisu typu „mrożona pizza 300 g” → { text: 'mrożona pizza', grams: 300 }. */
+export function splitQuantity(query: string): { text: string; grams: number | null } {
+  const match = query.match(/(\d+(?:[.,]\d+)?)\s*(g|gr|gram\w*|ml|kg)\b\.?/i);
+  if (!match) return { text: query.trim(), grams: null };
+  const value = parseNumber(match[1]);
+  const grams = match[2].toLowerCase() === 'kg' ? value * 1000 : value;
+  const text = query.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+  return { text: text || query.trim(), grams: grams > 0 ? Math.round(grams) : null };
 }

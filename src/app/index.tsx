@@ -8,11 +8,30 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, Card, Macros, ProgressBar } from '@/components/ui';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { deleteEntry, getDailyGoal, getEntriesForDate } from '@/db/database';
+import { deleteEntry, deleteMeal, getDailyGoal, getEntriesForDate } from '@/db/database';
 import { shiftDateKey, sumTotals, toDateKey } from '@/lib/nutrition';
 import type { Entry } from '@/lib/types';
 
-const SOURCE_LABEL: Record<Entry['source'], string> = { manual: 'ręcznie', search: 'baza', photo: 'zdjęcie' };
+const SOURCE_LABEL: Record<Entry['source'], string> = { manual: 'ręcznie', search: 'baza', photo: 'zdjęcie', ai: 'AI' };
+
+type Group = { key: string; mealId: number | null; name: string | null; entries: Entry[] };
+
+/** Pozycje zapisane razem pokazujemy jako jeden posiłek. */
+function groupByMeal(entries: Entry[]): Group[] {
+  const groups: Group[] = [];
+  const byMeal = new Map<number, Group>();
+  for (const e of entries) {
+    const existing = e.mealId != null ? byMeal.get(e.mealId) : undefined;
+    if (existing) {
+      existing.entries.push(e);
+      continue;
+    }
+    const group: Group = { key: e.mealId != null ? `m${e.mealId}` : `e${e.id}`, mealId: e.mealId, name: e.mealName, entries: [e] };
+    if (e.mealId != null) byMeal.set(e.mealId, group);
+    groups.push(group);
+  }
+  return groups;
+}
 
 function dateLabel(key: string) {
   const today = toDateKey(new Date());
@@ -27,6 +46,7 @@ export default function TodayScreen() {
   const [date, setDate] = useState(() => toDateKey(new Date()));
   const [entries, setEntries] = useState<Entry[]>([]);
   const [goal, setGoal] = useState(0);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setEntries(await getEntriesForDate(db, date));
@@ -51,6 +71,26 @@ export default function TodayScreen() {
         style: 'destructive',
         onPress: async () => {
           await deleteEntry(db, entry.id);
+          load();
+        },
+      },
+    ]);
+
+  const toggle = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
+  const confirmDeleteMeal = (group: Group) =>
+    Alert.alert(`Usunąć posiłek „${group.name}”?`, `${group.entries.length} pozycje, ${sumTotals(group.entries).kcal} kcal`, [
+      { text: 'Anuluj', style: 'cancel' },
+      {
+        text: 'Usuń',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteMeal(db, group.mealId!);
           load();
         },
       },
@@ -88,23 +128,51 @@ export default function TodayScreen() {
               Brak posiłków w tym dniu.
             </ThemedText>
           ) : (
-            entries.map((e) => (
-              <Pressable key={e.id} onLongPress={() => confirmDelete(e)}>
-                <Card style={styles.entry}>
-                  <View style={styles.entryText}>
-                    <ThemedText numberOfLines={2}>{e.name}</ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {Math.round(e.grams)} g · {SOURCE_LABEL[e.source]}
-                    </ThemedText>
-                  </View>
-                  <ThemedText type="smallBold">{Math.round(e.kcal)} kcal</ThemedText>
-                </Card>
-              </Pressable>
-            ))
+            groupByMeal(entries).map((g) =>
+              g.entries.length > 1 && g.mealId != null ? (
+                <Pressable key={g.key} onPress={() => toggle(g.key)} onLongPress={() => confirmDeleteMeal(g)}>
+                  <Card>
+                    <View style={styles.entry}>
+                      <View style={styles.entryText}>
+                        <ThemedText numberOfLines={1}>{g.name}</ThemedText>
+                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={expanded.has(g.key) ? undefined : 1}>
+                          {g.entries.map((e) => e.name).join(', ')}
+                        </ThemedText>
+                      </View>
+                      <ThemedText type="smallBold">{sumTotals(g.entries).kcal} kcal</ThemedText>
+                    </View>
+                    {expanded.has(g.key) && g.entries.map((e) => (
+                      <Pressable key={e.id} onLongPress={() => confirmDelete(e)} style={styles.entry}>
+                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.entryText}>
+                          {e.name} · {Math.round(e.grams)} g
+                        </ThemedText>
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {Math.round(e.kcal)} kcal
+                        </ThemedText>
+                      </Pressable>
+                    ))}
+                    {expanded.has(g.key) ? <Macros value={sumTotals(g.entries)} /> : null}
+                  </Card>
+                </Pressable>
+              ) : (
+                <Pressable key={g.key} onLongPress={() => confirmDelete(g.entries[0])}>
+                  <Card style={styles.entry}>
+                    <View style={styles.entryText}>
+                      <ThemedText numberOfLines={2}>{g.entries[0].name}</ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        {g.name ? `${g.name} · ` : ''}
+                        {Math.round(g.entries[0].grams)} g · {SOURCE_LABEL[g.entries[0].source]}
+                      </ThemedText>
+                    </View>
+                    <ThemedText type="smallBold">{Math.round(g.entries[0].kcal)} kcal</ThemedText>
+                  </Card>
+                </Pressable>
+              ),
+            )
           )}
           {entries.length > 0 ? (
             <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
-              Przytrzymaj pozycję, aby ją usunąć.
+              Dotknij posiłku, żeby zobaczyć składniki. Przytrzymaj, aby usunąć.
             </ThemedText>
           ) : null}
 
