@@ -27,6 +27,19 @@ export function Button({ title, onPress, variant = 'primary', disabled, loading 
   );
 }
 
+export function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.chip, { backgroundColor: selected ? theme.primary : theme.backgroundSelected }]}>
+      <ThemedText type="small" style={{ color: selected ? theme.onPrimary : theme.text }}>
+        {label}
+      </ThemedText>
+    </Pressable>
+  );
+}
+
 export function Card({ style, ...rest }: ViewProps) {
   const theme = useTheme();
   return <View style={[styles.card, { backgroundColor: theme.backgroundElement }, style]} {...rest} />;
@@ -79,6 +92,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexGrow: 1,
   },
+  chip: { paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, borderRadius: 999 },
   card: { padding: Spacing.three, borderRadius: Spacing.three, gap: Spacing.two },
   inputWrap: { gap: Spacing.one, flexGrow: 1, flexBasis: 0 },
   input: { borderWidth: 1, borderRadius: Spacing.two, paddingHorizontal: Spacing.three, minHeight: 44, fontSize: 16 },

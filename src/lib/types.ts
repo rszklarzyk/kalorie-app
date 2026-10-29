@@ -33,3 +33,11 @@ export type Draft = {
 };
 
 export type Totals = Per100g;
+
+/** Naczynie użytkownika: waga pustego naczynia pozwala policzyć masę samego jedzenia. */
+export type Dish = {
+  id: number;
+  name: string;
+  weightG: number;
+  diameterCm: number | null;
+};
