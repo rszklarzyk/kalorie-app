@@ -13,7 +13,7 @@ import { Button, Card, Chip, Input } from '@/components/ui';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { addEntry, getDishes, getRecentNames } from '@/db/database';
 import { analyzePhoto, isPhotoAnalysisConfigured } from '@/lib/analyze-photo';
-import { draftToEntry, forPortion, parseNumber, sumTotals, toDateKey } from '@/lib/nutrition';
+import { draftToEntry, forPortion, mealNameFor, parseNumber, sumTotals, toDateKey } from '@/lib/nutrition';
 import { getByBarcode, searchFoods, toDraft, type FoodResult } from '@/lib/openfoodfacts';
 import type { Dish, Draft, Entry } from '@/lib/types';
 
@@ -52,6 +52,7 @@ export default function AddScreen() {
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [dishId, setDishId] = useState<number | null>(null);
   const [scaleWeight, setScaleWeight] = useState('');
+  const [mealName, setMealName] = useState('');
 
   useFocusEffect(
     useCallback(() => {
@@ -101,7 +102,11 @@ export default function AddScreen() {
     if (!query.trim()) return;
     setBusy('Szukam…');
     try {
-      setResults(await searchFoods(query.trim()));
+      const found = await searchFoods(query.trim());
+      setResults(found);
+      if (found.length === 0) {
+        Alert.alert('Brak wyników', `Nie znalazłem „${query.trim()}” w Open Food Facts. Sprawdź pisownię albo wpisz produkt ręcznie.`);
+      }
     } catch (err) {
       Alert.alert('Błąd wyszukiwania', errorMessage(err));
     } finally {
@@ -126,13 +131,16 @@ export default function AddScreen() {
   const save = async () => {
     const valid = drafts.filter((d) => d.name.trim() && d.grams > 0);
     if (valid.length === 0) return Alert.alert('Nic do zapisania', 'Uzupełnij nazwę i porcję.');
+    // Wszystko zapisane naraz to jeden posiłek, np. śniadanie ze zdjęcia.
+    const meal = { id: Date.now(), name: mealName.trim() || mealNameFor(new Date()) };
     await db.withTransactionAsync(async () => {
-      for (const d of valid) await addEntry(db, draftToEntry({ ...d, name: d.name.trim() }, date));
+      for (const d of valid) await addEntry(db, draftToEntry({ ...d, name: d.name.trim() }, date, meal));
     });
     setDrafts([]);
     setNotes('');
     setHint('');
     setScaleWeight('');
+    setMealName('');
     setResults([]);
     setQuery('');
     router.navigate('/');
@@ -261,7 +269,10 @@ export default function AddScreen() {
           ))}
 
           {drafts.length > 0 ? (
-            <Button title={`Zapisz (${total.kcal} kcal)`} onPress={save} disabled={!!busy} />
+            <>
+              <Input label="Posiłek" placeholder={mealNameFor(new Date())} value={mealName} onChangeText={setMealName} />
+              <Button title={`Zapisz posiłek (${total.kcal} kcal)`} onPress={save} disabled={!!busy} />
+            </>
           ) : null}
         </ScrollView>
       </SafeAreaView>

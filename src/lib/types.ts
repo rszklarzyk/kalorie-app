@@ -17,6 +17,9 @@ export type Entry = {
   fat: number;
   carbs: number;
   source: EntrySource;
+  /** Pozycje zapisane razem (np. ze jednego zdjęcia) mają wspólny posiłek. */
+  mealId: number | null;
+  mealName: string | null;
   createdAt: string;
 };
 

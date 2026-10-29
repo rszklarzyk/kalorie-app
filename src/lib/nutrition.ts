@@ -12,8 +12,27 @@ export function forPortion(per100g: Per100g, grams: number): Per100g {
   };
 }
 
-export function draftToEntry(draft: Draft, date: string): NewEntry {
-  return { date, name: draft.name, grams: draft.grams, source: draft.source, ...forPortion(draft.per100g, draft.grams) };
+type Meal = { id: number; name: string } | null;
+
+export function draftToEntry(draft: Draft, date: string, meal: Meal = null): NewEntry {
+  return {
+    date,
+    name: draft.name,
+    grams: draft.grams,
+    source: draft.source,
+    mealId: meal?.id ?? null,
+    mealName: meal?.name ?? null,
+    ...forPortion(draft.per100g, draft.grams),
+  };
+}
+
+/** Domyślna nazwa posiłku według pory dnia. */
+export function mealNameFor(date: Date): string {
+  const h = date.getHours();
+  if (h < 11) return 'Śniadanie';
+  if (h < 16) return 'Obiad';
+  if (h < 21) return 'Kolacja';
+  return 'Przekąska';
 }
 
 export function sumTotals(items: Per100g[]): Totals {
