@@ -33,6 +33,8 @@ export type Draft = {
   grams: number;
   per100g: Per100g;
   source: EntrySource;
+  /** Porcja wyjściowa (np. „1 średni banan” = 120 g), od której liczymy ½×, 2× itd. */
+  baseGrams?: number;
 };
 
 export type Totals = Per100g;

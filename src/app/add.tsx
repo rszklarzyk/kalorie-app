@@ -68,7 +68,18 @@ export default function AddScreen() {
   const scale = parseNumber(scaleWeight);
   const foodGrams = scale > 0 ? Math.round(scale - (dish?.weightG ?? 0)) : 0;
 
-  const addDrafts = (more: Draft[]) => setDrafts((d) => [...d, ...more]);
+  const addDrafts = (more: Draft[]) =>
+    setDrafts((d) => [...d, ...more.map((x) => (x.baseGrams || x.source === 'manual' ? x : { ...x, baseGrams: x.grams }))]);
+
+  /** Szybkie dodawanie: to, co wpisano w wyszukiwarce, staje się nazwą (i gramaturą). */
+  const quickAdd = () => {
+    const parsed = query.trim() ? splitQuantity(query) : null;
+    addDrafts([{ ...emptyDraft(), name: parsed?.text ?? '', grams: parsed?.grams ?? 100 }]);
+    setResults([]);
+    setSuggestions([]);
+    setSearched(null);
+    setQuery('');
+  };
 
   const runPhoto = async (fromCamera: boolean) => {
     const perm = fromCamera
@@ -308,7 +319,7 @@ export default function AddScreen() {
           </Card>
 
           <View style={styles.row}>
-            <Button title="Wpisz ręcznie" variant="secondary" onPress={() => addDrafts([emptyDraft()])} disabled={!!busy} />
+            <Button title="Szybkie dodawanie (nazwa i kcal)" variant="secondary" onPress={quickAdd} disabled={!!busy} />
           </View>
 
           {recent.length > 0 && drafts.length === 0 ? (
@@ -344,6 +355,7 @@ export default function AddScreen() {
             <DraftEditor
               key={i}
               draft={d}
+              dishes={dishes}
               onChange={(next) => setDrafts((all) => all.map((x, j) => (j === i ? next : x)))}
               onRemove={() => setDrafts((all) => all.filter((_, j) => j !== i))}
             />
