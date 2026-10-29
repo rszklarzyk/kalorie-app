@@ -129,11 +129,11 @@ type Content = Anthropic.Beta.BetaContentBlockParam[];
 
 /** Jedno zapytanie do Claude ze strukturalną odpowiedzią JSON. */
 /**
- * Zdjęcia analizuje Opus (z zapasowym modelem przy odmowie), a proste podpowiedzi porcji
- * tańszy Haiku, który nie obsługuje parametru fallbacks.
+ * Zdjęcia analizuje Sonnet (kompromis ceny i trafności, z zapasowym modelem przy odmowie),
+ * a proste podpowiedzi porcji najtańszy Haiku, który nie obsługuje parametru fallbacks.
  */
 const MODELS = {
-  photo: { model: 'claude-opus-5-5', betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' },
+  photo: { model: 'claude-sonnet-5-5', betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' },
   suggest: { model: 'claude-haiku-5-5' },
 } satisfies Record<string, Partial<Anthropic.Beta.MessageCreateParamsNonStreaming>>;
 
