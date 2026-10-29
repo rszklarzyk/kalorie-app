@@ -148,6 +148,8 @@ export default function AddScreen() {
 
   const total = sumTotals(drafts.map((d) => forPortion(d.per100g, d.grams)));
 
+  if (scanning) return <BarcodeScanner onScanned={onScanned} onClose={() => setScanning(false)} />;
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -276,7 +278,6 @@ export default function AddScreen() {
           ) : null}
         </ScrollView>
       </SafeAreaView>
-      <BarcodeScanner visible={scanning} onScanned={onScanned} onClose={() => setScanning(false)} />
     </ThemedView>
   );
 }

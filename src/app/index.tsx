@@ -46,6 +46,7 @@ export default function TodayScreen() {
   const [date, setDate] = useState(() => toDateKey(new Date()));
   const [entries, setEntries] = useState<Entry[]>([]);
   const [goal, setGoal] = useState(0);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setEntries(await getEntriesForDate(db, date));
@@ -74,6 +75,13 @@ export default function TodayScreen() {
         },
       },
     ]);
+
+  const toggle = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   const confirmDeleteMeal = (group: Group) =>
     Alert.alert(`Usunąć posiłek „${group.name}”?`, `${group.entries.length} pozycje, ${sumTotals(group.entries).kcal} kcal`, [
@@ -122,15 +130,18 @@ export default function TodayScreen() {
           ) : (
             groupByMeal(entries).map((g) =>
               g.entries.length > 1 && g.mealId != null ? (
-                <Pressable key={g.key} onLongPress={() => confirmDeleteMeal(g)}>
+                <Pressable key={g.key} onPress={() => toggle(g.key)} onLongPress={() => confirmDeleteMeal(g)}>
                   <Card>
                     <View style={styles.entry}>
-                      <ThemedText type="smallBold" style={styles.entryText}>
-                        {g.name}
-                      </ThemedText>
+                      <View style={styles.entryText}>
+                        <ThemedText numberOfLines={1}>{g.name}</ThemedText>
+                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={expanded.has(g.key) ? undefined : 1}>
+                          {g.entries.map((e) => e.name).join(', ')}
+                        </ThemedText>
+                      </View>
                       <ThemedText type="smallBold">{sumTotals(g.entries).kcal} kcal</ThemedText>
                     </View>
-                    {g.entries.map((e) => (
+                    {expanded.has(g.key) && g.entries.map((e) => (
                       <Pressable key={e.id} onLongPress={() => confirmDelete(e)} style={styles.entry}>
                         <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.entryText}>
                           {e.name} · {Math.round(e.grams)} g
@@ -140,7 +151,7 @@ export default function TodayScreen() {
                         </ThemedText>
                       </Pressable>
                     ))}
-                    <Macros value={sumTotals(g.entries)} />
+                    {expanded.has(g.key) ? <Macros value={sumTotals(g.entries)} /> : null}
                   </Card>
                 </Pressable>
               ) : (
@@ -161,7 +172,7 @@ export default function TodayScreen() {
           )}
           {entries.length > 0 ? (
             <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
-              Przytrzymaj posiłek lub pozycję, aby usunąć.
+              Dotknij posiłku, żeby zobaczyć składniki. Przytrzymaj, aby usunąć.
             </ThemedText>
           ) : null}
 
