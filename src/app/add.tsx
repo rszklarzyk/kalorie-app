@@ -13,7 +13,7 @@ import { Button, Card, Chip, Input } from '@/components/ui';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { addEntry, cacheSuggestions, getCachedSuggestions, getDishes, getRecentNames } from '@/db/database';
 import { analyzePhoto, isPhotoAnalysisConfigured } from '@/lib/analyze-photo';
-import { draftToEntry, forPortion, mealNameFor, parseNumber, sumTotals, toDateKey } from '@/lib/nutrition';
+import { draftToEntry, forPortion, mealNameFor, parseNumber, splitQuantity, sumTotals, toDateKey } from '@/lib/nutrition';
 import { getByBarcode, searchFoods, toDraft, type FoodResult } from '@/lib/openfoodfacts';
 import { suggestPortions, type Suggestion } from '@/lib/suggest';
 import type { Dish, Draft, Entry } from '@/lib/types';
@@ -49,6 +49,7 @@ export default function AddScreen() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoodResult[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [searched, setSearched] = useState<{ text: string; grams: number | null } | null>(null);
   const [scanning, setScanning] = useState(false);
   const [recent, setRecent] = useState<Entry[]>([]);
   const [dishes, setDishes] = useState<Dish[]>([]);
@@ -100,30 +101,52 @@ export default function AddScreen() {
     }
   };
 
+  // Najpierw darmowa baza Open Food Facts; AI (płatne, choć tanie) tylko na życzenie.
   const runSearch = async () => {
-    const q = query.trim();
-    if (!q) return;
+    if (!query.trim()) return;
+    const parsed = splitQuantity(query);
+    setSearched(parsed);
     setBusy('Szukam…');
     setResults([]);
     setSuggestions([]);
-    // Porcje od AI i produkty z Open Food Facts szukamy równolegle; jedno może zawieść bez psucia drugiego.
-    const cachedPortions = async () => {
-      const cached = await getCachedSuggestions<Suggestion[]>(db, q);
-      if (cached) return cached;
-      const fresh = await suggestPortions(q);
-      if (fresh.length > 0) await cacheSuggestions(db, q, fresh);
-      return fresh;
-    };
-    const [ai, off] = await Promise.allSettled([cachedPortions(), searchFoods(q)]);
-    if (ai.status === 'fulfilled') setSuggestions(ai.value);
-    if (off.status === 'fulfilled') setResults(off.value);
-    setBusy(null);
+    try {
+      const found = await searchFoods(parsed.text);
+      setResults(found);
+      if (found.length === 0 && !isPhotoAnalysisConfigured) {
+        Alert.alert('Brak wyników', `Nic nie znalazłem dla „${parsed.text}”. Sprawdź pisownię albo wpisz produkt ręcznie.`);
+      }
+    } catch (err) {
+      Alert.alert('Błąd wyszukiwania', errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
 
-    const found = (ai.status === 'fulfilled' ? ai.value.length : 0) + (off.status === 'fulfilled' ? off.value.length : 0);
-    if (found > 0) return;
-    const failed = [ai, off].find((r): r is PromiseRejectedResult => r.status === 'rejected');
-    if (failed) Alert.alert('Błąd wyszukiwania', errorMessage(failed.reason));
-    else Alert.alert('Brak wyników', `Nic nie znalazłem dla „${q}”. Sprawdź pisownię albo wpisz produkt ręcznie.`);
+  const askAi = async () => {
+    if (!searched) return;
+    setBusy('Pytam AI…');
+    try {
+      const cached = await getCachedSuggestions<Suggestion[]>(db, searched.text);
+      const options = cached ?? (await suggestPortions(searched.text));
+      if (!cached && options.length > 0) await cacheSuggestions(db, searched.text, options);
+      setSuggestions(options);
+      if (options.length === 0) Alert.alert('Brak podpowiedzi', 'AI nie rozpoznało tego produktu. Wpisz go ręcznie.');
+    } catch (err) {
+      Alert.alert('Błąd podpowiedzi', errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Gramatura wpisana w wyszukiwarce („pizza 300 g”) wygrywa z domyślną porcją. */
+  const withSearchedGrams = (d: Draft): Draft => (searched?.grams ? { ...d, grams: searched.grams } : d);
+
+  const pickResult = (d: Draft) => {
+    addDrafts([withSearchedGrams(d)]);
+    setResults([]);
+    setSuggestions([]);
+    setSearched(null);
+    setQuery('');
   };
 
   const onScanned = async (code: string) => {
@@ -217,17 +240,22 @@ export default function AddScreen() {
           <Card>
             <ThemedText type="smallBold">Z bazy produktów</ThemedText>
             <View style={styles.row}>
-              <Input placeholder="np. jogurt naturalny" value={query} onChangeText={setQuery} onSubmitEditing={runSearch} returnKeyType="search" />
+              <Input placeholder="np. jogurt naturalny, pizza mrożona 300 g" value={query} onChangeText={setQuery} onSubmitEditing={runSearch} returnKeyType="search" />
             </View>
             <View style={styles.row}>
               <Button title="Szukaj" onPress={runSearch} disabled={!!busy} />
               <Button title="Skanuj kod" variant="secondary" onPress={() => setScanning(true)} disabled={!!busy} />
             </View>
-            {busy === 'Szukam…' ? (
+            {busy === 'Szukam…' || busy === 'Pytam AI…' ? (
               <View style={styles.row}>
                 <ActivityIndicator />
-                <ThemedText themeColor="textSecondary">Szukam porcji i produktów…</ThemedText>
+                <ThemedText themeColor="textSecondary">{busy}</ThemedText>
               </View>
+            ) : null}
+            {searched?.grams ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                Porcja: {searched.grams} g (z wpisu)
+              </ThemedText>
             ) : null}
             {suggestions.length > 0 ? (
               <ThemedText type="small" themeColor="textSecondary">
@@ -237,19 +265,15 @@ export default function AddScreen() {
             {suggestions.map((s, i) => (
               <Pressable
                 key={`ai-${i}`}
-                onPress={() => {
-                  addDrafts([s.draft]);
-                  setSuggestions([]);
-                  setResults([]);
-                }}
+                onPress={() => pickResult(s.draft)}
                 style={styles.result}>
                 <View style={styles.flex}>
                   <ThemedText numberOfLines={1}>{s.draft.name}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    {s.portion} · {s.draft.grams} g
+                    {searched?.grams ? `${searched.grams} g` : `${s.portion} · ${s.draft.grams} g`}
                   </ThemedText>
                 </View>
-                <ThemedText type="smallBold">{forPortion(s.draft.per100g, s.draft.grams).kcal} kcal</ThemedText>
+                <ThemedText type="smallBold">{forPortion(s.draft.per100g, withSearchedGrams(s.draft).grams).kcal} kcal</ThemedText>
               </Pressable>
             ))}
             {results.length > 0 ? (
@@ -260,20 +284,27 @@ export default function AddScreen() {
             {results.map((r, i) => (
               <Pressable
                 key={`${r.code ?? r.name}-${i}`}
-                onPress={() => {
-                  addDrafts([toDraft(r)]);
-                  setResults([]);
-                  setSuggestions([]);
-                }}
+                onPress={() => pickResult(toDraft(r))}
                 style={styles.result}>
                 <ThemedText numberOfLines={2} style={styles.flex}>
                   {r.name}
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
-                  {r.per100g.kcal} kcal/100 g
+                  {searched?.grams
+                    ? `${forPortion(r.per100g, searched.grams).kcal} kcal`
+                    : `${r.per100g.kcal} kcal/100 g`}
                 </ThemedText>
               </Pressable>
             ))}
+            {searched && !busy && suggestions.length === 0 && isPhotoAnalysisConfigured ? (
+              <View style={styles.row}>
+                <Button
+                  title={results.length > 0 ? 'Nie ma? Zapytaj AI o porcje' : 'Brak w bazie. Zapytaj AI o porcje'}
+                  variant="secondary"
+                  onPress={askAi}
+                />
+              </View>
+            ) : null}
           </Card>
 
           <View style={styles.row}>
@@ -296,7 +327,7 @@ export default function AddScreen() {
             </Card>
           ) : null}
 
-          {busy && busy !== 'Szukam…' ? (
+          {busy && busy !== 'Szukam…' && busy !== 'Pytam AI…' ? (
             <View style={styles.row}>
               <ActivityIndicator />
               <ThemedText themeColor="textSecondary">{busy}</ThemedText>

@@ -64,3 +64,13 @@ export function parseNumber(text: string): number {
   const n = Number(text.replace(',', '.').trim());
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
+
+/** Wyciąga gramaturę z wpisu typu „mrożona pizza 300 g” → { text: 'mrożona pizza', grams: 300 }. */
+export function splitQuantity(query: string): { text: string; grams: number | null } {
+  const match = query.match(/(\d+(?:[.,]\d+)?)\s*(g|gr|gram\w*|ml|kg)\b\.?/i);
+  if (!match) return { text: query.trim(), grams: null };
+  const value = parseNumber(match[1]);
+  const grams = match[2].toLowerCase() === 'kg' ? value * 1000 : value;
+  const text = query.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+  return { text: text || query.trim(), grams: grams > 0 ? Math.round(grams) : null };
+}
