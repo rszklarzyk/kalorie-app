@@ -11,7 +11,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, Card, Chip, Input } from '@/components/ui';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { addEntry, getDishes, getRecentNames } from '@/db/database';
+import { addEntry, cacheSuggestions, getCachedSuggestions, getDishes, getRecentNames } from '@/db/database';
 import { analyzePhoto, isPhotoAnalysisConfigured } from '@/lib/analyze-photo';
 import { draftToEntry, forPortion, mealNameFor, parseNumber, sumTotals, toDateKey } from '@/lib/nutrition';
 import { getByBarcode, searchFoods, toDraft, type FoodResult } from '@/lib/openfoodfacts';
@@ -107,7 +107,14 @@ export default function AddScreen() {
     setResults([]);
     setSuggestions([]);
     // Porcje od AI i produkty z Open Food Facts szukamy równolegle; jedno może zawieść bez psucia drugiego.
-    const [ai, off] = await Promise.allSettled([suggestPortions(q), searchFoods(q)]);
+    const cachedPortions = async () => {
+      const cached = await getCachedSuggestions<Suggestion[]>(db, q);
+      if (cached) return cached;
+      const fresh = await suggestPortions(q);
+      if (fresh.length > 0) await cacheSuggestions(db, q, fresh);
+      return fresh;
+    };
+    const [ai, off] = await Promise.allSettled([cachedPortions(), searchFoods(q)]);
     if (ai.status === 'fulfilled') setSuggestions(ai.value);
     if (off.status === 'fulfilled') setResults(off.value);
     setBusy(null);

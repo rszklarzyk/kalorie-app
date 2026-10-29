@@ -48,6 +48,11 @@ export async function migrate(db: SQLiteDatabase) {
     await db.execAsync(`
       ALTER TABLE entries ADD COLUMN meal_id INTEGER;
       ALTER TABLE entries ADD COLUMN meal_name TEXT;
+      CREATE TABLE IF NOT EXISTS suggestion_cache (
+        query TEXT PRIMARY KEY NOT NULL,
+        json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
     `);
   }
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -132,4 +137,21 @@ export async function addDish(db: SQLiteDatabase, dish: Omit<Dish, 'id'>) {
 
 export async function deleteDish(db: SQLiteDatabase, id: number) {
   await db.runAsync('DELETE FROM dishes WHERE id = ?', id);
+}
+
+/** Podpowiedzi AI zapamiętane lokalnie, żeby to samo zapytanie nie kosztowało drugi raz. */
+export async function getCachedSuggestions<T>(db: SQLiteDatabase, query: string): Promise<T | null> {
+  const row = await db.getFirstAsync<{ json: string }>(
+    "SELECT json FROM suggestion_cache WHERE query = ? AND created_at > datetime('now', '-90 days')",
+    query.toLowerCase(),
+  );
+  return row ? (JSON.parse(row.json) as T) : null;
+}
+
+export async function cacheSuggestions(db: SQLiteDatabase, query: string, value: unknown) {
+  await db.runAsync(
+    'INSERT OR REPLACE INTO suggestion_cache (query, json) VALUES (?, ?)',
+    query.toLowerCase(),
+    JSON.stringify(value),
+  );
 }
