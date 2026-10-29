@@ -128,16 +128,29 @@ function describeContext(body: Body): string {
 type Content = Anthropic.Beta.BetaContentBlockParam[];
 
 /** Jedno zapytanie do Claude ze strukturalną odpowiedzią JSON. */
-async function ask(env: Env, system: string, schema: Record<string, unknown>, content: Content): Promise<Response> {
+/**
+ * Zdjęcia analizuje Opus (z zapasowym modelem przy odmowie), a proste podpowiedzi porcji
+ * tańszy Haiku, który nie obsługuje parametru fallbacks.
+ */
+const MODELS = {
+  photo: { model: 'claude-opus-5-5', betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' },
+  suggest: { model: 'claude-haiku-5-5' },
+} satisfies Record<string, Partial<Anthropic.Beta.MessageCreateParamsNonStreaming>>;
+
+async function ask(
+  env: Env,
+  kind: keyof typeof MODELS,
+  system: string,
+  schema: Record<string, unknown>,
+  content: Content,
+): Promise<Response> {
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   try {
     const response = await client.beta.messages.create({
-      model: 'claude-opus-5-5',
+      ...MODELS[kind],
       max_tokens: 16000,
       // Proste rozpoznanie: niski wysiłek wystarcza i skraca czas odpowiedzi.
       output_config: { effort: 'low', format: { type: 'json_schema', schema } },
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
       system,
       messages: [{ role: 'user', content }],
     });
@@ -160,7 +173,7 @@ function analyzePhoto(env: Env, body: Body): Promise<Response> | Response {
   if (!body.image || body.image.length > MAX_IMAGE_BASE64 || !MEDIA_TYPES.includes(mediaType)) {
     return json({ error: 'Brak zdjęcia, zły format lub zdjęcie jest za duże' }, 400);
   }
-  return ask(env, SYSTEM_PROMPT, OUTPUT_SCHEMA, [
+  return ask(env, 'photo', SYSTEM_PROMPT, OUTPUT_SCHEMA, [
     { type: 'image', source: { type: 'base64', media_type: mediaType, data: body.image } },
     { type: 'text', text: describeContext(body) || 'Oszacuj ten posiłek.' },
   ]);
@@ -169,7 +182,7 @@ function analyzePhoto(env: Env, body: Body): Promise<Response> | Response {
 function suggest(env: Env, body: Body): Promise<Response> | Response {
   const query = body.query?.trim().slice(0, 100);
   if (!query) return json({ error: 'Brak zapytania' }, 400);
-  return ask(env, SUGGEST_PROMPT, SUGGEST_SCHEMA, [{ type: 'text', text: query }]);
+  return ask(env, 'suggest', SUGGEST_PROMPT, SUGGEST_SCHEMA, [{ type: 'text', text: query }]);
 }
 
 export default {
