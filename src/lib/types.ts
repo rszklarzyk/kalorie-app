@@ -23,7 +23,7 @@ export type Entry = {
   createdAt: string;
 };
 
-export type EntrySource = 'manual' | 'search' | 'photo';
+export type EntrySource = 'manual' | 'search' | 'photo' | 'ai';
 
 export type NewEntry = Omit<Entry, 'id' | 'createdAt'>;
 

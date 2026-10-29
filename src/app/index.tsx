@@ -12,7 +12,7 @@ import { deleteEntry, deleteMeal, getDailyGoal, getEntriesForDate } from '@/db/d
 import { shiftDateKey, sumTotals, toDateKey } from '@/lib/nutrition';
 import type { Entry } from '@/lib/types';
 
-const SOURCE_LABEL: Record<Entry['source'], string> = { manual: 'ręcznie', search: 'baza', photo: 'zdjęcie' };
+const SOURCE_LABEL: Record<Entry['source'], string> = { manual: 'ręcznie', search: 'baza', photo: 'zdjęcie', ai: 'AI' };
 
 type Group = { key: string; mealId: number | null; name: string | null; entries: Entry[] };
 

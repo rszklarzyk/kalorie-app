@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from '@/lib/http';
 import type { Draft, Per100g } from '@/lib/types';
 
 // Open Food Facts prosi o identyfikujący User-Agent: https://openfoodfacts.github.io/openfoodfacts-server/api/
@@ -50,7 +51,7 @@ async function searchNew(query: string): Promise<FoodResult[]> {
   const url =
     'https://search.openfoodfacts.org/search?' +
     new URLSearchParams({ q: query, langs: 'pl', page_size: '25', fields: FIELDS });
-  const res = await fetch(url, { headers: HEADERS });
+  const res = await fetchWithTimeout(url, { headers: HEADERS });
   if (!res.ok) throw new Error(`Open Food Facts: HTTP ${res.status}`);
   const json: { hits?: OffProduct[] } = await res.json();
   return toResults(json.hits);
@@ -60,7 +61,7 @@ async function searchClassic(query: string): Promise<FoodResult[]> {
   const url =
     'https://pl.openfoodfacts.org/cgi/search.pl?' +
     new URLSearchParams({ search_terms: query, search_simple: '1', action: 'process', json: '1', page_size: '25', fields: FIELDS });
-  const res = await fetch(url, { headers: HEADERS });
+  const res = await fetchWithTimeout(url, { headers: HEADERS });
   if (!res.ok) throw new Error(`Open Food Facts: HTTP ${res.status}`);
   const json: { products?: OffProduct[] } = await res.json();
   return toResults(json.products);
@@ -84,7 +85,7 @@ export async function searchFoods(query: string): Promise<FoodResult[]> {
 
 export async function getByBarcode(barcode: string): Promise<FoodResult | null> {
   const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json?fields=${FIELDS}`;
-  const res = await fetch(url, { headers: HEADERS });
+  const res = await fetchWithTimeout(url, { headers: HEADERS });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Open Food Facts: HTTP ${res.status}`);
   const json: { status?: number; product?: OffProduct } = await res.json();

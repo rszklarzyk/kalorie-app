@@ -15,6 +15,7 @@ import { addEntry, getDishes, getRecentNames } from '@/db/database';
 import { analyzePhoto, isPhotoAnalysisConfigured } from '@/lib/analyze-photo';
 import { draftToEntry, forPortion, mealNameFor, parseNumber, sumTotals, toDateKey } from '@/lib/nutrition';
 import { getByBarcode, searchFoods, toDraft, type FoodResult } from '@/lib/openfoodfacts';
+import { suggestPortions, type Suggestion } from '@/lib/suggest';
 import type { Dish, Draft, Entry } from '@/lib/types';
 
 const emptyDraft = (): Draft => ({
@@ -47,6 +48,7 @@ export default function AddScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoodResult[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [scanning, setScanning] = useState(false);
   const [recent, setRecent] = useState<Entry[]>([]);
   const [dishes, setDishes] = useState<Dish[]>([]);
@@ -99,19 +101,22 @@ export default function AddScreen() {
   };
 
   const runSearch = async () => {
-    if (!query.trim()) return;
+    const q = query.trim();
+    if (!q) return;
     setBusy('Szukam…');
-    try {
-      const found = await searchFoods(query.trim());
-      setResults(found);
-      if (found.length === 0) {
-        Alert.alert('Brak wyników', `Nie znalazłem „${query.trim()}” w Open Food Facts. Sprawdź pisownię albo wpisz produkt ręcznie.`);
-      }
-    } catch (err) {
-      Alert.alert('Błąd wyszukiwania', errorMessage(err));
-    } finally {
-      setBusy(null);
-    }
+    setResults([]);
+    setSuggestions([]);
+    // Porcje od AI i produkty z Open Food Facts szukamy równolegle; jedno może zawieść bez psucia drugiego.
+    const [ai, off] = await Promise.allSettled([suggestPortions(q), searchFoods(q)]);
+    if (ai.status === 'fulfilled') setSuggestions(ai.value);
+    if (off.status === 'fulfilled') setResults(off.value);
+    setBusy(null);
+
+    const found = (ai.status === 'fulfilled' ? ai.value.length : 0) + (off.status === 'fulfilled' ? off.value.length : 0);
+    if (found > 0) return;
+    const failed = [ai, off].find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed) Alert.alert('Błąd wyszukiwania', errorMessage(failed.reason));
+    else Alert.alert('Brak wyników', `Nic nie znalazłem dla „${q}”. Sprawdź pisownię albo wpisz produkt ręcznie.`);
   };
 
   const onScanned = async (code: string) => {
@@ -142,6 +147,7 @@ export default function AddScreen() {
     setScaleWeight('');
     setMealName('');
     setResults([]);
+    setSuggestions([]);
     setQuery('');
     router.navigate('/');
   };
@@ -210,12 +216,47 @@ export default function AddScreen() {
               <Button title="Szukaj" onPress={runSearch} disabled={!!busy} />
               <Button title="Skanuj kod" variant="secondary" onPress={() => setScanning(true)} disabled={!!busy} />
             </View>
+            {busy === 'Szukam…' ? (
+              <View style={styles.row}>
+                <ActivityIndicator />
+                <ThemedText themeColor="textSecondary">Szukam porcji i produktów…</ThemedText>
+              </View>
+            ) : null}
+            {suggestions.length > 0 ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                Typowe porcje
+              </ThemedText>
+            ) : null}
+            {suggestions.map((s, i) => (
+              <Pressable
+                key={`ai-${i}`}
+                onPress={() => {
+                  addDrafts([s.draft]);
+                  setSuggestions([]);
+                  setResults([]);
+                }}
+                style={styles.result}>
+                <View style={styles.flex}>
+                  <ThemedText numberOfLines={1}>{s.draft.name}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {s.portion} · {s.draft.grams} g
+                  </ThemedText>
+                </View>
+                <ThemedText type="smallBold">{forPortion(s.draft.per100g, s.draft.grams).kcal} kcal</ThemedText>
+              </Pressable>
+            ))}
+            {results.length > 0 ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                Produkty ze sklepu (Open Food Facts)
+              </ThemedText>
+            ) : null}
             {results.map((r, i) => (
               <Pressable
                 key={`${r.code ?? r.name}-${i}`}
                 onPress={() => {
                   addDrafts([toDraft(r)]);
                   setResults([]);
+                  setSuggestions([]);
                 }}
                 style={styles.result}>
                 <ThemedText numberOfLines={2} style={styles.flex}>
@@ -248,7 +289,7 @@ export default function AddScreen() {
             </Card>
           ) : null}
 
-          {busy ? (
+          {busy && busy !== 'Szukam…' ? (
             <View style={styles.row}>
               <ActivityIndicator />
               <ThemedText themeColor="textSecondary">{busy}</ThemedText>
