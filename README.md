@@ -8,11 +8,12 @@ Posiłek dodajesz ze zdjęcia, z bazy produktów, skanując kod kreskowy albo r�
 - **Dziś**: suma kalorii, białka, tłuszczu i węglowodanów, postęp względem dziennego celu, przeglądanie poprzednich dni. Przytrzymanie pozycji ją usuwa.
 - **Dodaj**:
   - zdjęcie posiłku (aparat lub galeria), które Claude rozbija na składniki z szacowaną gramaturą i wartościami na 100 g; wszystko można poprawić przed zapisem, a krótka wskazówka (np. „smażone na maśle”) poprawia wynik,
+  - opcjonalnie wybór naczynia i waga z wagi kuchennej: aplikacja odejmuje wagę naczynia, a gramatury składników są dopasowywane do zważonej masy,
   - wyszukiwarka i skaner kodów kreskowych z bazy [Open Food Facts](https://world.openfoodfacts.org),
   - ręczny wpis,
   - szybkie ponowne dodanie ostatnio jedzonych produktów.
 - **Historia**: ostatnie 14 dni i średnie z 7 oraz 14 dni.
-- **Ustawienia**: dzienny cel kalorii.
+- **Ustawienia**: dzienny cel kalorii i **Moje naczynia** (waga pustego naczynia, opcjonalnie średnica).
 
 Wszystkie wpisy są zapisywane tylko na telefonie (SQLite). Na zewnątrz trafiają jedynie zapytania do Open Food Facts i zdjęcia do analizy.
 

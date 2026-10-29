@@ -9,13 +9,13 @@ import { BarcodeScanner } from '@/components/barcode-scanner';
 import { DraftEditor } from '@/components/draft-editor';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button, Card, Input } from '@/components/ui';
+import { Button, Card, Chip, Input } from '@/components/ui';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { addEntry, getRecentNames } from '@/db/database';
+import { addEntry, getDishes, getRecentNames } from '@/db/database';
 import { analyzePhoto, isPhotoAnalysisConfigured } from '@/lib/analyze-photo';
-import { draftToEntry, forPortion, sumTotals, toDateKey } from '@/lib/nutrition';
+import { draftToEntry, forPortion, parseNumber, sumTotals, toDateKey } from '@/lib/nutrition';
 import { getByBarcode, searchFoods, toDraft, type FoodResult } from '@/lib/openfoodfacts';
-import type { Draft, Entry } from '@/lib/types';
+import type { Dish, Draft, Entry } from '@/lib/types';
 
 const emptyDraft = (): Draft => ({
   name: '',
@@ -49,12 +49,20 @@ export default function AddScreen() {
   const [results, setResults] = useState<FoodResult[]>([]);
   const [scanning, setScanning] = useState(false);
   const [recent, setRecent] = useState<Entry[]>([]);
+  const [dishes, setDishes] = useState<Dish[]>([]);
+  const [dishId, setDishId] = useState<number | null>(null);
+  const [scaleWeight, setScaleWeight] = useState('');
 
   useFocusEffect(
     useCallback(() => {
       getRecentNames(db).then(setRecent);
+      getDishes(db).then(setDishes);
     }, [db]),
   );
+
+  const dish = dishes.find((d) => d.id === dishId) ?? null;
+  const scale = parseNumber(scaleWeight);
+  const foodGrams = scale > 0 ? Math.round(scale - (dish?.weightG ?? 0)) : 0;
 
   const addDrafts = (more: Draft[]) => setDrafts((d) => [...d, ...more]);
 
@@ -65,12 +73,20 @@ export default function AddScreen() {
     if (!perm.granted) return Alert.alert('Brak uprawnień', 'Zezwól aplikacji na dostęp w ustawieniach telefonu.');
 
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], quality: 0.8 };
+    if (scale > 0 && foodGrams <= 0) {
+      return Alert.alert('Sprawdź wagę', 'Waga z wagi jest mniejsza niż waga pustego naczynia.');
+    }
+
     const picked = fromCamera ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
     if (picked.canceled || !picked.assets[0]) return;
 
     setBusy('Analizuję zdjęcie…');
     try {
-      const result = await analyzePhoto(picked.assets[0].uri, hint);
+      const result = await analyzePhoto(picked.assets[0].uri, {
+        hint,
+        foodGrams: foodGrams > 0 ? foodGrams : undefined,
+        dish: dish ? { name: dish.name, diameterCm: dish.diameterCm } : undefined,
+      });
       addDrafts(result.drafts);
       setNotes(result.notes);
       if (result.drafts.length === 0) Alert.alert('Nie rozpoznano jedzenia', result.notes);
@@ -116,6 +132,7 @@ export default function AddScreen() {
     setDrafts([]);
     setNotes('');
     setHint('');
+    setScaleWeight('');
     setResults([]);
     setQuery('');
     router.navigate('/');
@@ -138,6 +155,29 @@ export default function AddScreen() {
             <ThemedText type="smallBold">Ze zdjęcia</ThemedText>
             {isPhotoAnalysisConfigured ? (
               <>
+                {dishes.length > 0 ? (
+                  <View style={styles.chips}>
+                    {[null, ...dishes].map((d) => (
+                      <Chip
+                        key={d?.id ?? 'none'}
+                        label={d ? d.name : 'Bez naczynia'}
+                        selected={(d?.id ?? null) === dishId}
+                        onPress={() => setDishId(d?.id ?? null)}
+                      />
+                    ))}
+                  </View>
+                ) : null}
+                <Input
+                  label={dish ? `Waga z naczyniem (g, opcjonalnie)` : 'Waga jedzenia (g, opcjonalnie)'}
+                  keyboardType="decimal-pad"
+                  value={scaleWeight}
+                  onChangeText={setScaleWeight}
+                />
+                {dish && foodGrams > 0 ? (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Samo jedzenie: {foodGrams} g
+                  </ThemedText>
+                ) : null}
                 <Input placeholder="Wskazówka (opcjonalnie), np. „kotlet smażony na maśle”" value={hint} onChangeText={setHint} />
                 <View style={styles.row}>
                   <Button title="Zrób zdjęcie" onPress={() => runPhoto(true)} disabled={!!busy} />
@@ -237,4 +277,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: Spacing.two, alignItems: 'center' },
   result: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.two },
   flex: { flex: 1 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
 });

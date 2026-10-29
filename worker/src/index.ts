@@ -4,7 +4,11 @@ import Anthropic from '@anthropic-ai/sdk';
  * Pośrednik między aplikacją a Claude API. Trzyma klucz API po stronie serwera,
  * żeby nie trafił do aplikacji na telefonie.
  *
- * POST / { image: <base64 JPEG>, mediaType: 'image/jpeg', hint?: string }
+ * POST / {
+ *   image: <base64 JPEG>, mediaType: 'image/jpeg', hint?: string,
+ *   foodGrams?: number,                              // zważona masa samego jedzenia
+ *   dish?: { name: string, diameterCm: number | null } // naczynie na zdjęciu
+ * }
  *   -> { items: [...], notes: string }
  */
 
@@ -14,7 +18,13 @@ interface Env {
   APP_TOKEN?: string;
 }
 
-type Body = { image?: string; mediaType?: string; hint?: string };
+type Body = {
+  image?: string;
+  mediaType?: string;
+  hint?: string;
+  foodGrams?: number;
+  dish?: { name?: string; diameterCm?: number | null };
+};
 
 const MAX_IMAGE_BASE64 = 5_000_000;
 
@@ -24,6 +34,9 @@ szacowaną masę porcji w gramach oraz wartości na 100 g (kcal, białko, tłusz
 oparte na typowych wartościach z tabel składu żywności. Masę porcji oceniaj po wielkości talerza,
 sztućców i innych przedmiotów w kadrze. Uwzględnij widoczne dodatki, np. olej, sos czy masło.
 Jeśli użytkownik dopisał wskazówkę, traktuj ją jako ważniejszą od samego zdjęcia.
+Jeśli użytkownik podał zważoną masę jedzenia, gramatury wszystkich pozycji muszą sumować się do tej masy;
+Twoim zadaniem jest wtedy rozdzielić ją między składniki na podstawie zdjęcia.
+Jeśli podał średnicę naczynia, użyj jej jako skali do oceny objętości.
 W polu notes napisz krótko po polsku, czego nie jesteś pewien (np. ukryty tłuszcz, nietypowa porcja).
 Jeśli na zdjęciu nie ma jedzenia, zwróć pustą listę items i wyjaśnij to w notes.`;
 
@@ -58,6 +71,23 @@ type MediaType = (typeof MEDIA_TYPES)[number];
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 
+const isNum = (v: unknown, min: number, max: number): v is number =>
+  typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+
+/** Składa dane od użytkownika w tekst dla modelu, odrzucając wartości spoza rozsądnego zakresu. */
+function describeContext(body: Body): string {
+  const lines: string[] = [];
+  const hint = body.hint?.trim().slice(0, 500);
+  if (hint) lines.push(`Wskazówka od użytkownika: ${hint}`);
+  if (isNum(body.foodGrams, 1, 5000)) lines.push(`Zważona masa samego jedzenia (bez naczynia): ${Math.round(body.foodGrams)} g.`);
+  const dishName = body.dish?.name?.trim().slice(0, 60);
+  if (dishName) {
+    const d = body.dish?.diameterCm;
+    lines.push(`Naczynie na zdjęciu: ${dishName}${isNum(d, 1, 80) ? `, średnica ${d} cm` : ''}.`);
+  }
+  return lines.join('\n');
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method !== 'POST') return json({ error: 'Użyj POST' }, 405);
@@ -77,7 +107,7 @@ export default {
     }
 
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-    const hint = body.hint?.trim().slice(0, 500);
+    const context = describeContext(body);
 
     try {
       const response = await client.beta.messages.create({
@@ -93,7 +123,7 @@ export default {
             role: 'user',
             content: [
               { type: 'image', source: { type: 'base64', media_type: mediaType, data: body.image } },
-              { type: 'text', text: hint ? `Wskazówka od użytkownika: ${hint}` : 'Oszacuj ten posiłek.' },
+              { type: 'text', text: context || 'Oszacuj ten posiłek.' },
             ],
           },
         ],

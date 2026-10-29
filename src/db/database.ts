@@ -1,9 +1,9 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import type { Entry, NewEntry } from '@/lib/types';
+import type { Dish, Entry, NewEntry } from '@/lib/types';
 
 export const DATABASE_NAME = 'kalorie.db';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 export const DEFAULT_DAILY_GOAL = 2000;
 
 /** Tworzy lub migruje schemat. Wywoływane przez SQLiteProvider przy starcie. */
@@ -31,6 +31,16 @@ export async function migrate(db: SQLiteDatabase) {
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY NOT NULL,
         value TEXT NOT NULL
+      );
+    `);
+  }
+  if (version < 2) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS dishes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        weight_g REAL NOT NULL,
+        diameter_cm REAL
       );
     `);
   }
@@ -84,4 +94,22 @@ export async function setDailyGoal(db: SQLiteDatabase, kcal: number) {
     "INSERT INTO settings (key, value) VALUES ('daily_goal', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     String(Math.round(kcal)),
   );
+}
+
+type DishRow = { id: number; name: string; weight_g: number; diameter_cm: number | null };
+
+export async function getDishes(db: SQLiteDatabase): Promise<Dish[]> {
+  const rows = await db.getAllAsync<DishRow>('SELECT * FROM dishes ORDER BY name');
+  return rows.map((r) => ({ id: r.id, name: r.name, weightG: r.weight_g, diameterCm: r.diameter_cm }));
+}
+
+export async function addDish(db: SQLiteDatabase, dish: Omit<Dish, 'id'>) {
+  await db.runAsync(
+    'INSERT INTO dishes (name, weight_g, diameter_cm) VALUES (?, ?, ?)',
+    dish.name, dish.weightG, dish.diameterCm,
+  );
+}
+
+export async function deleteDish(db: SQLiteDatabase, id: number) {
+  await db.runAsync('DELETE FROM dishes WHERE id = ?', id);
 }
